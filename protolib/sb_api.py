@@ -2,7 +2,7 @@
 import socket
 import threading
 import unittest
-import ipc_pack_pb2 as pb
+import protolib.ipc_pack_pb2 as pb
 
 class RtpgenRestGW_SBapi(object):
   BUF_SIZE=1024
