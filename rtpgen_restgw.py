@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.6
 # -*- coding:utf-8 -*-
 
+import random
 import unittest
 import os
 import json
@@ -24,6 +25,79 @@ audio_file   =   os.getenv("AUDIO_FILE"  , None     )
 ''' global variables '''
 app = Flask(__name__)
 logger = getLogger(__name__)
+
+
+class RtpgenRestGW(object):
+  def __init__(self):
+    ''' 
+    resouce map : like below
+    {
+      portid:{
+        sessionid:{
+          "enabled":true,
+          "src":{"ip":ipaddr, "port":portnum},
+          "dst":{"ip":ipaddr, "port":portnum},
+          "start_timestamp":rtp_timestamp_when_started
+        }
+      }
+    }
+    '''
+    self.resourceMap={}
+
+  def getrsc(self, portid, sessionid):
+    rsc=self.resourceMap
+    if not portid in rsc or not sessionid in rsc[portid]:
+      return None
+    return rsc[portid][sessionid]
+
+  def srchrsc(self, src, dst):
+    sip, sport = src
+    dip, dport = dst
+    rsc=self.resourceMap
+    for portid in rsc.keys():
+      for sessionid in rsc[portid].keys():
+        tgt=rsc[portid][sessionid]
+        if sip == tgt['src']['ip'] and sport == tgt['src']['port'] and \
+           dip == tgt['dst']['ip'] and dport == tgt['dst']['port'] :
+           return portid, sessionid
+    return None, None
+  
+  def addrsc(self, portid, sessionid, src, dst):
+    rsc=self.resourceMap
+    if not portid in rsc:
+      rsc[portid]={}
+    if sessionid in rsc[portid]:
+      return None
+    sip, sport = src
+    dip, dport = dst
+    timesatmp=random.randint(0,0xffffffff)
+    rsc[portid][sessionid]={
+      "enabled":True,
+      "src":{"ip":sip,"port":sport},
+      "dst":{"ip":dip,"port":dport},
+      "start_timestamp":timesatmp
+    }
+    return rsc[portid][sessionid]
+  
+  def putrsc(self, portid, sessionid, src, dst):
+    rsc=self.resourceMap
+    if not portid in rsc or not sessionid in rsc[portid]:
+      return None
+    sip, sport = src
+    dip, dport = dst
+    rsc[portid][sessionid]["src"]["ip"  ]=sip
+    rsc[portid][sessionid]["src"]["port"]=sport
+    rsc[portid][sessionid]["dst"]["ip"  ]=dip
+    rsc[portid][sessionid]["dst"]["port"]=dport
+    return rsc[portid][sessionid]
+  
+  def delrsc(self, portid, sessionid):
+    rsc=self.resourceMap
+    if not portid in rsc or not sessionid in rsc[portid]:
+      return None
+    rsc[portid][sessionid]["enabled"]=False
+    return rsc[portid][sessionid]
+
 
 ''' API Call '''
 @app.route('/api/v1/resources/<srcIP>:<srcPort>/<destIP>:<destPort>',
@@ -73,7 +147,6 @@ def error_handler(error):
   response = jsonify({ 'error': error.name.lower(), 'result': error.code })
   return response, error.code
 
-
 ''' main logic '''
 def main():
   logger.setLevel(loglevel)
@@ -98,9 +171,123 @@ if __name__ == '__main__':
 
 ''' Unit Test Cases '''
 class TestRtpGen_RESTGW(unittest.TestCase):
-  def setUp(self): pass
+  restgw=None
+  def setUp(self):
+    self.restgw=RtpgenRestGW()
 
   def tearDown(self):
-    pass
+    self.restgw=None
 
+  def appendMap(self):
+    rsc=self.restgw.resourceMap
+    for portid in range(1,254):
+      for sessionid in range(1,254):
+        if not portid in rsc:
+          rsc[portid]={}
+        rsc[portid][sessionid]={
+          "enabled":True,
+          "src":{"ip":"192.168.{}.{}".format(portid,sessionid),"port":portid},
+          "dst":{"ip":"192.168.{}.{}".format(sessionid,portid),"port":sessionid},
+          "start_timestamp":random.randint(0,0xffffffff)
+        }
 
+  def test_addrsc(self):
+    portid=43
+    sessionid=123
+    src=("192.168.0.1", 5006)
+    dst=("192.168.9.9", 8831)
+    self.assertIsNotNone(self.restgw.addrsc(portid, sessionid, src, dst))
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.0.1')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],5006)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.9.9')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],8831)
+
+  def test_addrsc_error(self):
+    self.appendMap()
+    portid=43
+    sessionid=123
+    src=("192.168.0.1", 5006)
+    dst=("192.168.9.9", 8831)
+    self.assertIsNone(self.restgw.addrsc(portid, sessionid, src, dst))
+
+  def test_putrsc(self):
+    self.appendMap()
+    portid=43
+    sessionid=123
+    src=("192.168.0.1", 5006)
+    dst=("192.168.9.9", 8831)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.43.123')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],43)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.123.43')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],123)
+    self.assertIsNotNone(self.restgw.putrsc(portid, sessionid, src, dst))
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.0.1')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],5006)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.9.9')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],8831)
+
+  def test_putrsc_error(self):
+    portid=43
+    sessionid=123
+    src=("192.168.0.1", 5006)
+    dst=("192.168.9.9", 8831)
+    self.assertIsNone(self.restgw.putrsc(portid, sessionid, src, dst))
+
+  def test_delrsc(self):
+    self.appendMap()
+    portid=43
+    sessionid=123
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.43.123')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],43)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.123.43')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],123)
+    self.assertIsNotNone(self.restgw.delrsc(portid, sessionid))
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],False)
+
+  def test_delrsc_error(self):
+    portid=43
+    sessionid=123
+    self.assertIsNone(self.restgw.delrsc(portid, sessionid))
+    
+  def test_srchrsc(self):
+    self.appendMap()
+    src=("192.168.93.231", 93)
+    dst=("192.168.231.93", 231)
+    portid, sessionid = self.restgw.srchrsc(src, dst)
+    self.assertIsNotNone(portid)
+    self.assertIsNotNone(sessionid)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.93.231')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],93)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.231.93')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],231)
+
+  def test_srchrsc_error(self):
+    self.appendMap()
+    src=("192.168.92.231", 93)
+    dst=("192.168.231.93", 231)
+    portid, sessionid = self.restgw.srchrsc(src, dst)
+    self.assertIsNone(portid)
+    self.assertIsNone(sessionid)
+    
+  def test_getrsc(self):
+    self.appendMap()
+    portid=93
+    sessionid=231
+    ret=self.restgw.getrsc(portid, sessionid)
+    self.assertIsNotNone(ret)
+    self.assertEqual(ret["enabled"],True)
+    self.assertEqual(ret["src"]["ip"],'192.168.93.231')
+    self.assertEqual(ret["src"]["port"],93)
+    self.assertEqual(ret["dst"]["ip"],'192.168.231.93')
+    self.assertEqual(ret["dst"]["port"],231)
+
+  def test_getrsc_error(self):
+    self.appendMap()
+    portid=283
+    sessionid=231
+    self.assertIsNone(self.restgw.getrsc(portid, sessionid))
