@@ -25,11 +25,21 @@ class RtpgenRestGW_SBapi(object):
     except:
       return None
 
+  def __init__(self, target=None):
+    self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if target:
+      self.sock.connect(target)
 
-  sock=None
+  def createConnection(self, target=('127.0.0.1',77099)):
+    self.sock.connect(target)
 
-  def setSock(self, sock):
-    self.sock=sock
+  def connectionClose(self):
+    if self.sock:
+      try:
+        self.sock.shutdown(socket.SHUT_RDWR)
+      except OSError:
+        pass
+      self.sock.close()
   
   def printVal(self, res):
     print('-'*30)
@@ -106,12 +116,12 @@ class RtpgenRestGW_SBapi(object):
 
     return pack
 
-  def sendmsg(self, sock, msg):
+  def   sendmsg(self, msg):
     res=None
-    sock.send(msg.SerializeToString())
+    self.sock.send(msg.SerializeToString())
     try:
       res=pb.RtpgenIPCmsgV1()
-      res.ParseFromString(sock.recv(RtpgenRestGW_SBapi.BUF_SIZE))
+      res.ParseFromString(self.sock.recv(RtpgenRestGW_SBapi.BUF_SIZE))
 
       if not res.HasField("response_code"):
         res=None
@@ -126,6 +136,7 @@ class TestRtpGen_ipcmanage(unittest.TestCase):
     self.ipc=RtpgenRestGW_SBapi()
   
   def tearDown(self):
+    self.ipc.connectionClose()
     self.ipc=None
 
   def checkHasField(self, msg, *args):
@@ -227,7 +238,7 @@ class TestRtpGen_ipcmanage(unittest.TestCase):
     pack=self.ipc.putmsg(portid, selector)
     self.assertEqual(pack.request_code, pb.RtpgenIPCmsgV1.UPDATE)
 
-  def stub_server(self,sock):
+  def stub_server(sock):
     msg=pb.RtpgenIPCmsgV1()
     msg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
     msg.portid=1
@@ -256,11 +267,10 @@ class TestRtpGen_ipcmanage(unittest.TestCase):
       server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
       server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
       server.bind(target)
-      th=threading.Thread(target=self.stub_server, args=(server, ))
+      th=threading.Thread(target=TestRtpGen_ipcmanage.stub_server, args=(server, ))
       th.start()
-      sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-      sock.connect(target)
-      res=self.ipc.sendmsg(sock, self.ipc.getmsg(0,1))
+      self.ipc.createConnection(target)
+      res=self.ipc.sendmsg(self.ipc.getmsg(0,1))
       self.assertEqual(res.response_code, pb.RtpgenIPCmsgV1.SUCCESS)
       self.assertEqual(res.portid,      1)
       self.assertEqual(res.id_selector, 2)

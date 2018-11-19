@@ -7,6 +7,7 @@ import os
 import json
 import logging as log
 import socket
+import threading
 import werkzeug.exceptions 
 from time import time, sleep
 from threading import Thread
@@ -17,10 +18,12 @@ import protolib.ipc_pack_pb2 as pb
 import protolib.sb_api as sbapi
 
 ''' ENVIROMENT VARIABLEs '''
-api_ip     =   os.getenv("API_IP"    , "0.0.0.0"  )
-api_port     = int(os.getenv("API_PORT"    , 5000    ))
-loglevel     = int(os.getenv("LOGLEVEL"    , log.DEBUG   ))
-audio_file   =   os.getenv("AUDIO_FILE"  , None     )
+api_ip       =     os.getenv("API_IP"    , "0.0.0.0"  )
+api_port     = int(os.getenv("API_PORT"  , 5000       ))
+target_ip    =     os.getenv("SB_PORT"   , "127.0.0.1")
+target_port  = int(os.getenv("SB_PORT"   , 55077      ))
+loglevel     = int(os.getenv("LOGLEVEL"  , log.DEBUG  ))
+audio_file   =   os.getenv("AUDIO_FILE"  , None       )
 
 ''' global variables '''
 app = Flask(__name__)
@@ -28,7 +31,7 @@ logger = getLogger(__name__)
 
 
 class RtpgenRestGW(object):
-  def __init__(self):
+  def __init__(self, target):
     ''' 
     resouce map : like below
     {
@@ -43,6 +46,10 @@ class RtpgenRestGW(object):
     }
     '''
     self.resourceMap={}
+    self.sb = sbapi.RtpgenRestGW_SBapi(target=target)
+
+  def __del__(self):
+    self.sb.connectionClose()
 
   def getrsc(self, portid, sessionid):
     rsc=self.resourceMap
@@ -172,10 +179,29 @@ if __name__ == '__main__':
 ''' Unit Test Cases '''
 class TestRtpGen_RESTGW(unittest.TestCase):
   restgw=None
+
   def setUp(self):
-    self.restgw=RtpgenRestGW()
+    target=('127.0.0.1',43991)
+
+    self.server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+    self.server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+    self.server.bind(target)
+    self.th=threading.Thread(target=sbapi.TestRtpGen_ipcmanage.stub_server, 
+                             args=(self.server, ))
+    self.th.start()
+    self.restgw=RtpgenRestGW(target)
 
   def tearDown(self):
+    self.restgw.sb.connectionClose()
+    if self.server:
+      try:
+        self.server.shutdown(socket.SHUT_RDWR)
+      except OSError:
+        pass
+      self.server.close()
+    if self.th:
+      self.th.join()
     self.restgw=None
 
   def appendMap(self):
