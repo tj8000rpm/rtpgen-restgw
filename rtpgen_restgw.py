@@ -30,8 +30,8 @@ app = Flask(__name__)
 logger = getLogger(__name__)
 
 
-class RtpgenRestGW(object):
-  def __init__(self, target):
+class ResourceMapManager(object):
+  def __init__(self):
     ''' 
     resouce map : like below
     {
@@ -46,18 +46,50 @@ class RtpgenRestGW(object):
     }
     '''
     self.resourceMap={}
-    self.sb = sbapi.RtpgenRestGW_SBapi(target=target)
-
-  def __del__(self):
-    self.sb.connectionClose()
 
   def getrsc(self, portid, sessionid):
+    """Get resource map value using port id and sessionid
+ 
+    You can get resouce map value like src, dst, is active and started time,
+    using port id and session id.
+    'None' will be returned if you can not find from resource map.
+  
+    Args:
+      portid (int): Port id in resouce map.
+      sessionid (int): Session id in resouce map.
+  
+    Returns:
+      Object: Found resource, included 'enabled(bool)',
+              'src(ip,port)', 'dst(ip,port)' and 'start_timestamp(int)'
+  
+    """
     rsc=self.resourceMap
     if not portid in rsc or not sessionid in rsc[portid]:
       return None
     return rsc[portid][sessionid]
 
   def srchrsc(self, src, dst):
+    """Search portid and sessionid from resource map 
+ 
+    You can find port id and session id from resouce map,
+    using src-ip, src-port, dst-ip and dst-port.
+    In case of same src and dst in different port id or sessionid,
+    you can find only one pair(NOT guaranteed as get same result anytime.).
+    'None' will be returned if you can not find from resource map.
+    This funciton using liner searching algorithm.
+    Order of the function is O(n*m).
+    # n=number of porid, m=number of sessionid.
+  
+    Args:
+      src (tuple of (str, int)): Soruce of ip address(as str) and
+                                 port number(as int) tuples.
+      dst (tuple of (srt, int)): Destination of ip address and port number.
+  
+    Returns:
+      Integer: Found port id
+      Integer: Found session id
+  
+    """
     sip, sport = src
     dip, dport = dst
     rsc=self.resourceMap
@@ -69,7 +101,28 @@ class RtpgenRestGW(object):
            return portid, sessionid
     return None, None
   
-  def addrsc(self, portid, sessionid, src, dst):
+  def addrsc(self, portid, sessionid, src, dst, timestamp):
+    """Add a new resource into resource map 
+ 
+    You can add a new resource information such as 'src(ip,port)',
+    'dst(ip,port)' and 'start_timestamp(int)' by the port id and the session id.
+    And also mark 'enabled' to meaning resource is active.
+    'None' will be returned if you can not find port id or session id
+    from resource map.
+  
+    Args:
+      portid(int): Target of port id.
+      sessionid(int): Target of session id.
+      src (tuple of (str, int)): Soruce of ip address(as str) and 
+                                 port number(as int) tuples.
+      dst (tuple of (srt, int)): Destination of ip address and port number.
+      timestamp(int): Set a started time to calculate a duration.
+  
+    Returns:
+      Object: Created resrouce, included 'enabled(bool)', 
+              'src(ip,port)', 'dst(ip,port)' and 'start_timestamp(int)'
+  
+    """
     rsc=self.resourceMap
     if not portid in rsc:
       rsc[portid]={}
@@ -77,28 +130,69 @@ class RtpgenRestGW(object):
       return None
     sip, sport = src
     dip, dport = dst
-    timesatmp=random.randint(0,0xffffffff)
+    
     rsc[portid][sessionid]={
       "enabled":True,
       "src":{"ip":sip,"port":sport},
       "dst":{"ip":dip,"port":dport},
-      "start_timestamp":timesatmp
+      "start_timestamp":timestamp
     }
     return rsc[portid][sessionid]
   
-  def putrsc(self, portid, sessionid, src, dst):
+  def putrsc(self, portid, sessionid, src, dst, timestamp=None):
+    """Update an existing resource into resource map 
+ 
+    You can update a existing resource information such as 'src(ip,port)',
+    'dst(ip,port)' and 'start_timestamp(int)' by port id and session id.
+    'timestamp' is optional update information(NOT mandatory value).
+    'None' will be returned if you can not find port id or session id
+    from resource map.
+  
+    Args:
+      portid(int): Target of port id.
+      sessionid(int): Target of session id.
+      src (tuple of (str, int)): Soruce of ip address(as str) and 
+                                 port number(as int) tuples.
+      dst (tuple of (srt, int)): Destination of ip address and port number.
+      timestamp(int): OPTIONAL. Reset a started time to calculate a duration.
+  
+    Returns:
+      Object: Created resrouce, included 'enabled(bool)', 
+              'src(ip,port)', 'dst(ip,port)' and 'start_timestamp(int)'
+  
+    """
     rsc=self.resourceMap
     if not portid in rsc or not sessionid in rsc[portid]:
       return None
     sip, sport = src
     dip, dport = dst
+
     rsc[portid][sessionid]["src"]["ip"  ]=sip
     rsc[portid][sessionid]["src"]["port"]=sport
     rsc[portid][sessionid]["dst"]["ip"  ]=dip
     rsc[portid][sessionid]["dst"]["port"]=dport
+    if timestamp:
+      rsc[portid][sessionid]["start_timestamp"]=timestamp
     return rsc[portid][sessionid]
   
   def delrsc(self, portid, sessionid):
+    """Delete an existing resource into resource map 
+ 
+    You can delete a existing resource information by the port id and the session id.
+    This function will not flush out an existing resource object,
+    it is just mark 'disabled' as resource is inactive.
+    'None' will be returned if you can not find port id or session id
+    from resource map.
+  
+    Args:
+      portid(int): Target of port id.
+      sessionid(int): Target of session id.
+  
+    Returns:
+      Object: Created resrouce, included 'enabled(bool)', 
+              'src(ip,port)', 'dst(ip,port)' and 'start_timestamp(int)'
+  
+    """
     rsc=self.resourceMap
     if not portid in rsc or not sessionid in rsc[portid]:
       return None
@@ -177,23 +271,15 @@ if __name__ == '__main__':
   main()
 
 ''' Unit Test Cases '''
-class TestRtpGen_RESTGW(unittest.TestCase):
-  restgw=None
+class TestResourceMapManager(unittest.TestCase):
 
   def setUp(self):
-    target=('127.0.0.1',43991)
-
-    self.server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    self.server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
-    self.server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
-    self.server.bind(target)
-    self.th=threading.Thread(target=sbapi.TestRtpGen_ipcmanage.stub_server, 
-                             args=(self.server, ))
-    self.th.start()
-    self.restgw=RtpgenRestGW(target)
+    self.target=('127.0.0.1',43991)
+    self.server=None
+    self.th=None
+    self.restgw=ResourceMapManager()
 
   def tearDown(self):
-    self.restgw.sb.connectionClose()
     if self.server:
       try:
         self.server.shutdown(socket.SHUT_RDWR)
@@ -203,6 +289,35 @@ class TestRtpGen_RESTGW(unittest.TestCase):
     if self.th:
       self.th.join()
     self.restgw=None
+
+  def msgReadSuccess(self):
+    msg=pb.RtpgenIPCmsgV1()
+    msg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
+    msg.portid=1
+    msg.id_selector=2
+    msg.rtp_config.ip_dst_addr=4
+    msg.rtp_config.ip_src_addr=5
+    msg.rtp_config.udp_dst_port=6
+    msg.rtp_config.udp_src_port=7
+    msg.rtp_config.rtp_timestamp=8
+    msg.rtp_config.rtp_sequence=9
+    msg.rtp_config.rtp_ssrc=10
+    return msg
+
+  def msgWriteSuccess(self):
+    msg=pb.RtpgenIPCmsgV1()
+    msg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
+    return msg
+
+  def stubServerLaunch(self, msg):
+    self.server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+    self.server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+    self.server.bind(self.target)
+    self.th=threading.Thread(target=sbapi.TestRtpGen_ipcmanage.stub_server, 
+                             args=(self.server, msg, ))
+    self.th.start()
+    self.restgw=ResourceMapManager(self.target)
 
   def appendMap(self):
     rsc=self.restgw.resourceMap
@@ -222,12 +337,14 @@ class TestRtpGen_RESTGW(unittest.TestCase):
     sessionid=123
     src=("192.168.0.1", 5006)
     dst=("192.168.9.9", 8831)
-    self.assertIsNotNone(self.restgw.addrsc(portid, sessionid, src, dst))
+    timestamp=random.randint(0,0xffffffff)
+    self.assertIsNotNone(self.restgw.addrsc(portid, sessionid, src, dst, timestamp))
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
-    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.0.1')
-    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],5006)
-    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.9.9')
-    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],8831)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"], '192.168.0.1')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"], 5006)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"], '192.168.9.9')
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"], 8831)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["start_timestamp"], timestamp)
 
   def test_addrsc_error(self):
     self.appendMap()
@@ -235,7 +352,8 @@ class TestRtpGen_RESTGW(unittest.TestCase):
     sessionid=123
     src=("192.168.0.1", 5006)
     dst=("192.168.9.9", 8831)
-    self.assertIsNone(self.restgw.addrsc(portid, sessionid, src, dst))
+    timestamp=random.randint(0,0xffffffff)
+    self.assertIsNone(self.restgw.addrsc(portid, sessionid, src, dst, timestamp))
 
   def test_putrsc(self):
     self.appendMap()
@@ -243,17 +361,19 @@ class TestRtpGen_RESTGW(unittest.TestCase):
     sessionid=123
     src=("192.168.0.1", 5006)
     dst=("192.168.9.9", 8831)
+    timestamp=random.randint(0,0xffffffff)
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.43.123')
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],43)
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.123.43')
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],123)
-    self.assertIsNotNone(self.restgw.putrsc(portid, sessionid, src, dst))
+    self.assertIsNotNone(self.restgw.putrsc(portid, sessionid, src, dst, timestamp))
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["enabled"],True)
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["ip"],'192.168.0.1')
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["src"]["port"],5006)
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.9.9')
     self.assertEqual(self.restgw.resourceMap[portid][sessionid]["dst"]["port"],8831)
+    self.assertEqual(self.restgw.resourceMap[portid][sessionid]["start_timestamp"], timestamp)
 
   def test_putrsc_error(self):
     portid=43
@@ -317,3 +437,4 @@ class TestRtpGen_RESTGW(unittest.TestCase):
     portid=283
     sessionid=231
     self.assertIsNone(self.restgw.getrsc(portid, sessionid))
+

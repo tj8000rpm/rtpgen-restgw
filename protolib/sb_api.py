@@ -4,17 +4,39 @@ import threading
 import unittest
 import protolib.ipc_pack_pb2 as pb
 
-class RtpgenRestGW_SBapi(object):
+class SouthboundApiManager(object):
   BUF_SIZE=1024
 
   @staticmethod
   def ip_i2s(ip_addr):
+    """Convert from ip address as integer to as string
+
+    You can convert to string value from input value of ip address as integer.
+
+    Args:
+      ip_addr_str(int): ip address as integer.
+  
+    Returns:
+      str: ip address as string.
+ 
+    """
     return "{}.{}.{}.{}".format((ip_addr>>24)&0xff,
                                 (ip_addr>>16)&0xff,
                                 (ip_addr>> 8)&0xff,
                                 (ip_addr>> 0)&0xff)
   @staticmethod
   def ip_s2i(ip_addr_str):
+    """Convert from ip address as string to as integer
+
+    You can convert to integer value from input value of ip address as string.
+
+    Args:
+      ip_addr_str(str): ip address as string.
+  
+    Returns:
+      integer: ip address as integer
+ 
+    """
     try:
       h1,h2,h3,h4=ip_addr_str.split('.',4)
       h1=int(h1)
@@ -26,14 +48,48 @@ class RtpgenRestGW_SBapi(object):
       return None
 
   def __init__(self, target=None):
+    """Constructor
+
+    Create socket descriptor.
+    In case of set the 'target' value, you can create connection(OPTIONAL).
+
+    Args:
+      target(tuple(str,int)): A target API endpoint as tuple of ipaddr and port.
+  
+    Returns:
+      voided
+ 
+    """
     self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     if target:
-      self.sock.connect(target)
+      self.createConnection(target)
 
   def createConnection(self, target=('127.0.0.1',77099)):
+    """Open the scoket connection
+
+    You can connect to southbound API endpoint.
+
+    Args:
+      target(tuple(str,int)): A target API endpoint as tuple of ipaddr and port.
+  
+    Returns:
+      voided
+ 
+    """
     self.sock.connect(target)
 
   def connectionClose(self):
+    """Close the scoket connection
+
+    You can disconnect to southbound API endpoint.
+
+    Args:
+      voided
+  
+    Returns:
+      voided
+ 
+    """
     if self.sock:
       try:
         self.sock.shutdown(socket.SHUT_RDWR)
@@ -42,6 +98,17 @@ class RtpgenRestGW_SBapi(object):
       self.sock.close()
   
   def printVal(self, res):
+    """Printing a protobuf message
+
+    You can print a protobuf message object for debugging.
+
+    Args:
+      res(Object): A protobuf message object.
+  
+    Returns:
+      voided
+ 
+    """
     print('-'*30)
     if res.HasField("request_code"):
       print('Request code: {}'.format(res.request_code))
@@ -73,6 +140,19 @@ class RtpgenRestGW_SBapi(object):
       print('ssrc     : {}'.format(conf.rtp_ssrc))
   
   def getmsg(self, portid, selector):
+    """Generate a protobuf message for read in CRUD operation
+
+    You can generate a protobuf message object for read operation.
+    'portid' and 'selector' are mandatory values for identifying resources.
+
+    Args:
+      request_code(Enum): The type of request code(Defined by '.proto' file).
+      portid(int): Port id for identifying resources.
+  
+    Returns:
+      Object: Generated request message object as protobuf.
+ 
+    """
     pack=pb.RtpgenIPCmsgV1()
     pack.request_code=pb.RtpgenIPCmsgV1.READ
     pack.id_selector=selector
@@ -80,6 +160,19 @@ class RtpgenRestGW_SBapi(object):
     return pack
 
   def delmsg(self, portid, selector):
+    """Generate a protobuf message for delete in CRUD operation
+
+    You can generate a protobuf message object for delete operation.
+    'portid' and 'selector' are mandatory values for identifying resources.
+
+    Args:
+      request_code(Enum): The type of request code(Defined by '.proto' file).
+      portid(int): Port id for identifying resources.
+  
+    Returns:
+      Object: Generated request message object as protobuf.
+ 
+    """
     pack=pb.RtpgenIPCmsgV1()
     pack.request_code=pb.RtpgenIPCmsgV1.DELETE
     pack.id_selector=selector
@@ -87,13 +180,68 @@ class RtpgenRestGW_SBapi(object):
     return pack
 
   def postmsg(self, portid, selector, src=None, dst=None, timestamp=None, sequence=None, ssrc=None):
+    """Generate a protobuf message for create in CRUD operation
+    
+    Details shown below 'writemsg' function.
+
+    Args:
+      portid(int): Port id for identifying resources.
+      selector(int): Session id for identifying resources.
+      src(tuple(str,int)): OPTIONAL. Source ip and port as updating data.
+      dst(tuple(str,int)): OPTIONAL. Destination ip and port as updating data.
+      timestamp(int): OPTIONAL. RTP timestamp as updating data.
+      sequence(int): OPTIONAL. RTP sequence number as updating data.
+      ssrc(int): OPTIONAL. RTP SSRC as updating data.
+  
+    Returns:
+      Object: Generated request message object as protobuf.
+ 
+    """
     return self.writemsg(pb.RtpgenIPCmsgV1.CREATE, portid,selector,src,dst,timestamp,sequence,ssrc)
   
   def putmsg(self, portid, selector, src=None, dst=None, timestamp=None, sequence=None, ssrc=None):
+    """Generate a protobuf message for update in CRUD operation
+    
+    Details shown below 'writemsg' function.
+
+    Args:
+      portid(int): Port id for identifying resources.
+      selector(int): Session id for identifying resources.
+      src(tuple(str,int)): OPTIONAL. Source ip and port as updating data.
+      dst(tuple(str,int)): OPTIONAL. Destination ip and port as updating data.
+      timestamp(int): OPTIONAL. RTP timestamp as updating data.
+      sequence(int): OPTIONAL. RTP sequence number as updating data.
+      ssrc(int): OPTIONAL. RTP SSRC as updating data.
+  
+    Returns:
+      Object: Generated request message object as protobuf.
+ 
+    """
     return self.writemsg(pb.RtpgenIPCmsgV1.UPDATE, portid,selector,src,dst,timestamp,sequence,ssrc)
   
   def writemsg(self, request_code, portid, selector,
                src=None, dst=None, timestamp=None, sequence=None, ssrc=None):
+    """Generate a protobuf message for create or update in CRUD operation
+
+    You can generate a protobuf message object for create or update operation.
+    This choise is made possible by set Enum value in 'request_code'.
+    'portid' and 'selector' are mandatory values for identifying resources.
+    Which 'src' to 'ssrc' are optional value, you set if needed update that value.
+
+    Args:
+      request_code(Enum): The type of request code(Defined by '.proto' file).
+      portid(int): Port id for identifying resources.
+      selector(int): Session id for identifying resources.
+      src(tuple(str,int)): OPTIONAL. Source ip and port as updating data.
+      dst(tuple(str,int)): OPTIONAL. Destination ip and port as updating data.
+      timestamp(int): OPTIONAL. RTP timestamp as updating data.
+      sequence(int): OPTIONAL. RTP sequence number as updating data.
+      ssrc(int): OPTIONAL. RTP SSRC as updating data.
+  
+    Returns:
+      Object: Generated request message object as protobuf.
+ 
+    """
     pack=pb.RtpgenIPCmsgV1()
     pack.request_code=request_code
     pack.id_selector=selector
@@ -101,11 +249,11 @@ class RtpgenRestGW_SBapi(object):
   
     if(src!=None):
         ip, port=src;
-        pack.rtp_config.ip_src_addr=RtpgenRestGW_SBapi.ip_s2i(ip)
+        pack.rtp_config.ip_src_addr=SouthboundApiManager.ip_s2i(ip)
         pack.rtp_config.udp_src_port=port
     if(dst!=None):
         ip, port=dst;
-        pack.rtp_config.ip_dst_addr=RtpgenRestGW_SBapi.ip_s2i(ip)
+        pack.rtp_config.ip_dst_addr=SouthboundApiManager.ip_s2i(ip)
         pack.rtp_config.udp_dst_port=port
     if(timestamp!=None):
         pack.rtp_config.rtp_timestamp=timestamp
@@ -116,12 +264,25 @@ class RtpgenRestGW_SBapi(object):
 
     return pack
 
-  def   sendmsg(self, msg):
+  def sendmsg(self, msg):
+    """Send a protobuf message thorough the southbound API
+
+    You can send a protobuf message thorough the southbound API.
+    The message is serialized by protobuf method and transported by socket liblary.
+    'None' will be returned if any exception raised or malformed packet returned.
+
+    Args:
+      msg(Object): A sending request protobuf message object.
+  
+    Returns:
+      Object: A received response protobuf message object.
+ 
+    """
     res=None
     self.sock.send(msg.SerializeToString())
     try:
       res=pb.RtpgenIPCmsgV1()
-      res.ParseFromString(self.sock.recv(RtpgenRestGW_SBapi.BUF_SIZE))
+      res.ParseFromString(self.sock.recv(SouthboundApiManager.BUF_SIZE))
 
       if not res.HasField("response_code"):
         res=None
@@ -130,10 +291,10 @@ class RtpgenRestGW_SBapi(object):
 
     return res
 
-class TestRtpGen_ipcmanage(unittest.TestCase):
+class Test_SouthboundApiManager(unittest.TestCase):
   ipc=None
   def setUp(self):
-    self.ipc=RtpgenRestGW_SBapi()
+    self.ipc=SouthboundApiManager()
   
   def tearDown(self):
     self.ipc.connectionClose()
@@ -152,14 +313,14 @@ class TestRtpGen_ipcmanage(unittest.TestCase):
     return ret
   
   def test_ip_i2s(self):
-    self.assertEqual(RtpgenRestGW_SBapi.ip_i2s(0xffffff00), '255.255.255.0')
-    self.assertEqual(RtpgenRestGW_SBapi.ip_i2s(0xff00ff00), '255.0.255.0')
-    self.assertEqual(RtpgenRestGW_SBapi.ip_i2s(0x7f500010), '127.80.0.16')
+    self.assertEqual(SouthboundApiManager.ip_i2s(0xffffff00), '255.255.255.0')
+    self.assertEqual(SouthboundApiManager.ip_i2s(0xff00ff00), '255.0.255.0')
+    self.assertEqual(SouthboundApiManager.ip_i2s(0x7f500010), '127.80.0.16')
 
   def test_ip_s2i(self):
-    self.assertEqual(0xffffff00, RtpgenRestGW_SBapi.ip_s2i('255.255.255.0'))
-    self.assertEqual(0xff00ff00, RtpgenRestGW_SBapi.ip_s2i('255.0.255.0'  ))
-    self.assertEqual(0x7f500010, RtpgenRestGW_SBapi.ip_s2i('127.80.0.16'  ))
+    self.assertEqual(0xffffff00, SouthboundApiManager.ip_s2i('255.255.255.0'))
+    self.assertEqual(0xff00ff00, SouthboundApiManager.ip_s2i('255.0.255.0'  ))
+    self.assertEqual(0x7f500010, SouthboundApiManager.ip_s2i('127.80.0.16'  ))
 
   def test_getmsg(self):
     portid=67
@@ -238,22 +399,10 @@ class TestRtpGen_ipcmanage(unittest.TestCase):
     pack=self.ipc.putmsg(portid, selector)
     self.assertEqual(pack.request_code, pb.RtpgenIPCmsgV1.UPDATE)
 
-  def stub_server(sock):
-    msg=pb.RtpgenIPCmsgV1()
-    msg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
-    msg.portid=1
-    msg.id_selector=2
-    msg.size=3
-    msg.rtp_config.ip_dst_addr=4
-    msg.rtp_config.ip_src_addr=5
-    msg.rtp_config.udp_dst_port=6
-    msg.rtp_config.udp_src_port=7
-    msg.rtp_config.rtp_timestamp=8
-    msg.rtp_config.rtp_sequence=9
-    msg.rtp_config.rtp_ssrc=10
+  def stub_server(sock, msg):
     sock.listen(1)
     ssock, remoteaddrs = sock.accept() 
-    ssock.recv(RtpgenRestGW_SBapi.BUF_SIZE)
+    ssock.recv(SouthboundApiManager.BUF_SIZE)
     ssock.send(msg.SerializeToString())
     ssock.close()
     
@@ -262,12 +411,26 @@ class TestRtpGen_ipcmanage(unittest.TestCase):
     sock=None
     server=None
     target=('127.0.0.1',43991)
+
+    expectmsg=pb.RtpgenIPCmsgV1()
+    expectmsg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
+    expectmsg.portid=1
+    expectmsg.id_selector=2
+    expectmsg.size=3
+    expectmsg.rtp_config.ip_dst_addr=4
+    expectmsg.rtp_config.ip_src_addr=5
+    expectmsg.rtp_config.udp_dst_port=6
+    expectmsg.rtp_config.udp_src_port=7
+    expectmsg.rtp_config.rtp_timestamp=8
+    expectmsg.rtp_config.rtp_sequence=9
+    expectmsg.rtp_config.rtp_ssrc=10
+
     try:
       server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
       server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
       server.bind(target)
-      th=threading.Thread(target=TestRtpGen_ipcmanage.stub_server, args=(server, ))
+      th=threading.Thread(target=Test_SouthboundApiManager.stub_server, args=(server, expectmsg, ))
       th.start()
       self.ipc.createConnection(target)
       res=self.ipc.sendmsg(self.ipc.getmsg(0,1))
