@@ -399,12 +399,19 @@ class Test_SouthboundApiManager(unittest.TestCase):
     pack=self.ipc.putmsg(portid, selector)
     self.assertEqual(pack.request_code, pb.RtpgenIPCmsgV1.UPDATE)
 
-  def stub_server(sock, msg):
+  def stub_server(sock, msg, loop=1):
+    ssock=None
     sock.listen(1)
-    ssock, remoteaddrs = sock.accept() 
-    ssock.recv(SouthboundApiManager.BUF_SIZE)
-    ssock.send(msg.SerializeToString())
-    ssock.close()
+    try:
+      ssock, remoteaddrs = sock.accept() 
+      for i in range(loop):
+        ssock.recv(SouthboundApiManager.BUF_SIZE)
+        ssock.send(msg.SerializeToString())
+    except OSError:
+      pass
+    finally:
+      if ssock:
+        ssock.close()
     
   def test_sendmsg(self):
     th=None
