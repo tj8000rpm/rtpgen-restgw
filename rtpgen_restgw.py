@@ -112,8 +112,34 @@ class ResourceMapManager(object):
       for sessionid in rsc[portid].keys():
         tgt=rsc[portid][sessionid]
         if sip == tgt['src']['ip'] and sport == tgt['src']['port'] and \
-           dip == tgt['dst']['ip'] and dport == tgt['dst']['port'] :
-           return portid, sessionid
+           dip == tgt['dst']['ip'] and dport == tgt['dst']['port'] and \
+           tgt['enabled']:
+          return portid, sessionid
+    return None, None
+
+  def assignrsc(self):
+    """Assign a new port id and session id from resource map 
+ 
+    You can assign new port id and session id from resouce map.
+    This function always return a lower number of port id and 
+    session id in free resource.
+    Order of the function is O(n*m).
+    # n=number of portid, m=number of sessionid.
+  
+    Args:
+      voided:
+  
+    Returns:
+      Integer: Found port id
+      Integer: Found session id
+  
+    """
+    rsc=self.resourceMap
+    for portid in rsc.keys():
+      tgt=rsc[portid]
+      for sessionid in range(self.maxsessionid+1):
+        if not sessionid in tgt.keys() or not tgt[sessionid]['enabled']:
+          return portid, sessionid
     return None, None
   
   def addrsc(self, portid, sessionid, src, dst, timestamp):
@@ -226,40 +252,78 @@ class ResourceMapManager(object):
     return 200, None
 
 ''' API Call '''
+@app.route('/api/v1/dynamic',methods=['GET','DELETE','POST','PUT'])
 @app.route('/api/v1/id/<portid>:<sessionid>',methods=['GET','DELETE','POST','PUT'])
-#@app.route('/api/v1/id/<portid>:<sessionid>/<s_ip>:<s_port>/<d_ip>:<d_port>',
-#    methods=['POST','PUT'])
-def apiid(portid,sessionid,d_ip=None,d_port=None,s_ip=None,s_port=None):
+def apiid(portid=None, sessionid=None):
   retCode=200
   result={}
-  src=None
-  dst=None
-  try:
-    portid=int(portid)
-    sessionid=int(sessionid)
+  src=None; s_ip=None; s_port=None
+  dst=None; d_ip=None; d_port=None
+
+  # dynamic api port and id resolovatoin
+  # TODO: implement this case for dynamic api
+  # In case of Dynamic API
+  if not portid or not sessionid: 
+    try:
+      s_ip   = request.args.get('s_ip'  , type=str)
+      s_port = request.args.get('s_port', type=int)
+      d_ip   = request.args.get('d_ip'  , type=str)
+      d_port = request.args.get('d_port', type=int)
+      new_s_ip   = request.args.get('new_s_ip'  , type=str)
+      new_s_port = request.args.get('new_s_port', type=int)
+      new_d_ip   = request.args.get('new_d_ip'  , type=str)
+      new_d_port = request.args.get('new_d_port', type=int)
+
+      if not(s_ip and s_port and d_ip and d_port):
+        return returnErrorContent(400, 'mandatory input not found', result)
+      src=(s_ip, s_port)
+      dst=(d_ip, d_port)
+    except KeyError:
+      return returnErrorContent(500, 'internal server error', result)
+    portid, sessionid=rscmap.srchrsc(src=src, dst=dst)
+    # In case (src,dst) are not exist(Use case of POST)
+    if portid==None or sessionid==None:
+      if request.method in ['POST']:
+        portid, sessionid = rscmap.assignrsc()
+        if portid==None or sessionid==None:
+          return returnErrorContent(404, 'no enough resources', result)
+      else:
+        return returnErrorContent(404, 'not found', result)
+
+    if new_s_ip:   s_ip  =new_s_ip
+    if new_s_port: s_port=new_s_port
+    if new_d_ip:   d_ip  =new_d_ip
+    if new_d_port: d_port=new_d_port
+
     result['port_id']=portid
     result['session_id']=sessionid
+  # In case of ID API
+  else: 
+    try:
+      portid=int(portid)
+      sessionid=int(sessionid)
+      result['port_id']=portid
+      result['session_id']=sessionid
 
-    if request.method in ['PUT','POST']:
-      s_ip   = request.args.get('s_ip'  , default=None, type=str)
-      s_port = request.args.get('s_port', default=None, type=int)
-      d_ip   = request.args.get('d_ip'  , default=None, type=str)
-      d_port = request.args.get('d_port', default=None, type=int)
+      if request.method in ['PUT','POST']:
+        s_ip   = request.args.get('s_ip'  , default=None, type=str)
+        s_port = request.args.get('s_port', default=None, type=int)
+        d_ip   = request.args.get('d_ip'  , default=None, type=str)
+        d_port = request.args.get('d_port', default=None, type=int)
 
-      if not(s_ip and d_ip and s_port and d_port):
-        raise KeyError
-      s_port=int(s_port)
-      if s_port <= 0 or 1<<16 <= s_port:
-        raise ValueError
-      src=(s_ip, s_port)
-      d_port=int(d_port)
-      if d_port <= 0 or 1<<16 <= d_port:
-        raise ValueError
-      dst=(d_ip, d_port)
-  except ValueError:
-    return returnErrorContent(400, 'invalid argument(Not a valid number)', result)
-  except KeyError:
-    return returnErrorContent(400, 'mandatory input not found', result)
+      if s_port:
+        s_port=int(s_port)
+        if s_port <= 0 or 1<<16 <= s_port:
+          raise ValueError
+        src=(s_ip, s_port)
+      if d_port:
+        d_port=int(d_port)
+        if d_port <= 0 or 1<<16 <= d_port:
+          raise ValueError
+        dst=(d_ip, d_port)
+    except ValueError:
+      return returnErrorContent(400, 'invalid argument(Not a valid number)', result)
+
 
   try:
     if s_ip:
@@ -274,12 +338,18 @@ def apiid(portid,sessionid,d_ip=None,d_port=None,s_ip=None,s_port=None):
     return returnErrorContent(error, msg, result)
 
   try:
+    ############
+    #  POST
+    ############
     if request.method in ['POST']: 
       if error == 200:
         # Conflict error will reply if resource is existed
         return returnErrorContent(409,
             'port id:{} session id:{} is already exist'.format(portid, sessionid),
             result)
+
+      if not(s_ip and d_ip and s_port and d_port):
+        return returnErrorContent(400, 'mandatory input not found', result)
 
       # Create Southbound and resource map
       tmstmp=random.randint(0,0xffffffff)
@@ -294,10 +364,16 @@ def apiid(portid,sessionid,d_ip=None,d_port=None,s_ip=None,s_port=None):
     elif request.method in ['PUT','GET','DELETE']:
       if error == 404:
         return returnErrorContent(error, msg, result)
+      ##################
+      # GET
+      ##################
       # Read from resource map
       if request.method == 'GET':
         rsc=rscmap.getrsc(portid, sessionid)
         result['state']=rsc
+      ##################
+      # DELETE
+      ##################
       # Delete Southbound and resource map
       elif request.method == 'DELETE':
         ret=sb.sendmsg(sb.delmsg(portid,sessionid))
@@ -306,12 +382,26 @@ def apiid(portid,sessionid,d_ip=None,d_port=None,s_ip=None,s_port=None):
 
         rsc=rscmap.delrsc(portid, sessionid)
         result['state']=rsc
+      ##################
+      # PUT
+      ##################
       # Update Southbound and resource map
       elif request.method == 'PUT':
+        if not(s_ip or d_ip or s_port or d_port):
+          return returnErrorContent(400, 'no input arguments', result)
+        cur=rscmap.getrsc(portid, sessionid)
+        cur_src=cur['src']
+        cur_dst=cur['dst']
+        src=(cur_src['ip'], cur_src['port'])
+        dst=(cur_dst['ip'], cur_dst['port'])
+        if s_ip  : src=(s_ip, src[1])
+        if s_port: src=(src[0], s_port)
+        if d_ip  : dst=(d_ip, dst[1])
+        if d_port: dst=(dst[0], d_port)
+
         ret=sb.sendmsg(sb.putmsg(portid, sessionid, src=src, dst=dst))
         if not ret or ret.response_code != pb.RtpgenIPCmsgV1.SUCCESS:
           return returnErrorContent(500, 'IPC layer error', result)
-
         rsc=rscmap.putrsc(portid, sessionid, src=src, dst=dst)
         result['state']=rsc
   except ValueError as e:
@@ -327,33 +417,6 @@ def apiid(portid,sessionid,d_ip=None,d_port=None,s_ip=None,s_port=None):
   result['result']=retCode
 
   return jsonify(result), retCode
-
-#@app.route('/api/v1/resources/<s_ip>:<s_port>/<d_ip>:<d_port>',
-#    methods=['POST','GET','DELETE'])
-#def apirsc(d_ip,d_port,s_ip,s_port):
-#  retCode=200
-#  result={}
-#  try:
-#    d_port=int(d_port)
-#    s_port=int(s_port)
-#    if request.method in ['POST']: # ADD
-#      pass
-#    elif request.method in ['GET','DELETE']:
-#      pass
-#    result['id']=cic
-#  except ValueError as e:
-#    retCode=400
-#    result['error']='input is not a number'
-#  except TypeError as e:
-#    retCode=400
-#    result['error']=e.__str__()
-#  except Exception as e:
-#    if retCode==200:
-#      retCode=500
-#    result['error']=e.__str__()
-#  result['result']=retCode
-#
-#  return jsonify(result), retCode
 
 def returnErrorContent(code, reason, base=None):
   if base:
@@ -421,7 +484,7 @@ if __name__ == '__main__':
 
 ''' Unit Test Cases '''
 
-class TestRTPgenRESTGW(unittest.TestCase):
+class TestRTPgenRESTGW_API(unittest.TestCase):
   def setUp(self):
     global rscmap
     global sb
@@ -459,6 +522,9 @@ class TestRTPgenRESTGW(unittest.TestCase):
                            args=(self.server, msg, loop,))
     self.th.start()
 
+  ############################
+  ## end point of '/api/v1/id'
+  ############################
   def test_apiid_get(self):
     portid, sessionid=(0, 3)
     s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
@@ -547,6 +613,19 @@ class TestRTPgenRESTGW(unittest.TestCase):
     state=409; err='port id:{} session id:{} is already exist'.format(portid, sessionid)
     self.helperDataCheck(rs, state, err, portid, sessionid)
 
+  def test_apiid_post_no_args(self):
+    portid, sessionid=(0, 3)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    
+    rs=self.c.post('/api/v1/id/{}:{}'.format(portid, sessionid))
+    state=400; err='mandatory input not found'
+    self.helperDataCheck(rs, state, err, portid, sessionid)
+
   def test_apiid_post_id_invalid_argument_port(self):
     state=400
 
@@ -593,7 +672,6 @@ class TestRTPgenRESTGW(unittest.TestCase):
   def test_apiid_put(self):
     portid, sessionid=(0, 3)
     s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
-    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
     d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
     tmstmp=random.randint(0,0xffffffff)
     rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
@@ -603,9 +681,39 @@ class TestRTPgenRESTGW(unittest.TestCase):
     
     s_ip='10.0.0.1'; s_port=9000; src=(s_ip, s_port)
     suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
-    rs=self.c.put('/api/v1/id/0:3?'+suffix)
+    rs=self.c.put('/api/v1/id/{}:{}?{}'.format(portid, sessionid, suffix))
     state=200; err=None; enabled=True
     self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apiid_put_shortinput(self):
+    portid, sessionid=(0, 3)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    
+    s_ip='10.0.0.1'; src=(s_ip, s_port)
+    suffix='s_ip={}'.format(s_ip)
+    rs=self.c.put('/api/v1/id/{}:{}?{}'.format(portid, sessionid, suffix))
+    state=200; err=None; enabled=True
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apiid_put_noinput(self):
+    portid, sessionid=(0, 3)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    
+    rs=self.c.put('/api/v1/id/{}:{}'.format(portid, sessionid))
+    state=400; err='no input arguments'
+    self.helperDataCheck(rs, state, err, portid, sessionid)
 
   def test_apiid_put_id_notfound(self):
     portid, sessionid=(0, 3)
@@ -655,6 +763,254 @@ class TestRTPgenRESTGW(unittest.TestCase):
     state=200; err=None; enabled=True
     self.helperDataCheck(rs, state, err, portid, sessionid, enabled, None, src, dst)
 
+  #################################
+  ## end point of '/api/v1/dynamic'
+  #################################
+  def test_apidynamic_get(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.get('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apidynamic_get_shortinput(self):
+    portid, sessionid=(0, 3)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    suffix='s_ip={}&s_port={}&d_ip={}'.format(s_ip, s_port, d_ip)
+    rs=self.c.get('/api/v1/dynamic?{}'.format(suffix))
+    state=400; err='mandatory input not found'
+    self.helperDataCheck(rs, state, err, portid=None, sessionid=None)
+
+  def test_apidynamic_get_notfound(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    s_ip='192.168.0.1'; s_port=5001; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.get('/api/v1/dynamic?{}'.format(suffix))
+    state=404; err='not found'
+    self.helperDataCheck(rs, state, err, portid=None, sessionid=None)
+
+  def test_apidynamic_post(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+
+    s_ip='192.168.0.1'; s_port=5002; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8002; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.post('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True; portid=0; sessionid=1; tmstmp=None
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apidynamic_post_confilict(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.post('/api/v1/dynamic?{}'.format(suffix))
+    state=409; err='port id:{} session id:{} is already exist'.format(portid, sessionid)
+    self.helperDataCheck(rs, state, err, portid=None, sessionid=None)
+
+  def test_apidynamic_put(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+
+    s_ip='192.168.0.1'; s_port=5002; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8002; dst=(d_ip, d_port)
+    suffix+='&new_s_ip={}&new_s_port={}&new_d_ip={}&new_d_port={}'.format(
+                                                      s_ip, s_port, d_ip, d_port)
+    rs=self.c.put('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apidynamic_put_shortinput(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+
+    s_port=5002; src=(s_ip, s_port)
+    suffix+='&new_s_port={}'.format(s_port)
+    rs=self.c.put('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apidynamic_put_notfound(self):
+    portid, sessionid=(0, 0)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    s_ip='192.168.0.1'; s_port=5001; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+
+    s_ip='192.168.0.1'; s_port=5002; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8002; dst=(d_ip, d_port)
+    suffix+='&new_s_ip={}&new_s_port={}&new_d_ip={}&new_d_port={}'.format(
+                                                      s_ip, s_port, d_ip, d_port)
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.put('/api/v1/dynamic?{}'.format(suffix))
+    state=404; err='not found'
+    self.helperDataCheck(rs, state, err, portid=None, sessionid=None)
+
+  def test_apidynamic_del(self):
+    portid, sessionid=(0, 5)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+
+    portid, sessionid=(3, 0)
+    s_ip='192.168.0.1'; s_port=5004; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8004; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    bktmp=tmstmp
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+
+    portid, sessionid=(6, 3)
+    s_ip='192.168.0.1'; s_port=5002; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8002; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+
+    portid, sessionid=(3, 0)
+    s_ip='192.168.0.1'; s_port=5004; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8004; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.delete('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=False; tmstmp=bktmp
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  def test_apidynamic_del_notfound(self):
+    portid, sessionid=(0, 5)
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+
+    portid, sessionid=(3, 0)
+    s_ip='192.168.0.1'; s_port=5004; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8004; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    bktmp=tmstmp
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+
+    portid, sessionid=(6, 3)
+    s_ip='192.168.0.1'; s_port=5002; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8002; dst=(d_ip, d_port)
+    tmstmp=random.randint(0,0xffffffff)
+    rscmap.addrsc(portid, sessionid, src, dst, tmstmp)
+    
+    self.stubServerLaunch(self.helperCreateSuccessMsg(portid,sessionid))
+    connectServer(self.target)
+
+    s_ip='192.168.0.31'; s_port=5004; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8004; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.delete('/api/v1/dynamic?{}'.format(suffix))
+    state=404; err='not found'
+    self.helperDataCheck(rs, state, err, portid=None, sessionid=None)
+
+  def test_apidynamic_post_post_post_del_del_post(self):
+    self.stubServerLaunch(self.helperCreateSuccessMsg(0,0),loop=6)
+    connectServer(self.target)
+    # POST
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.post('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True; portid=0; sessionid=0; tmstmp=None
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+    # POST
+    s_ip='192.168.0.1'; s_port=5004; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8004; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.post('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True; portid=0; sessionid=1; tmstmp=None
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+    # POST
+    s_ip='192.168.0.1'; s_port=5008; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8008; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.post('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True; portid=0; sessionid=2; tmstmp=None
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+    # DEL
+    s_ip='192.168.0.1'; s_port=5000; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8000; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.delete('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=False; portid=0; sessionid=0; tmstmp=None
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+    #DEL
+    s_ip='192.168.0.1'; s_port=5004; src=(s_ip, s_port)
+    d_ip='172.16.0.1' ; d_port=8004; dst=(d_ip, d_port)
+    suffix='s_ip={}&s_port={}&d_ip={}&d_port={}'.format(s_ip, s_port, d_ip, d_port)
+    rs=self.c.delete('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=False; portid=0; sessionid=1; tmstmp=None
+    data=json.loads(rs.data.decode('utf-8'))
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+    # POST
+    rs=self.c.post('/api/v1/dynamic?{}'.format(suffix))
+    state=200; err=None; enabled=True; portid=0; sessionid=0; tmstmp=None
+    data=json.loads(rs.data.decode('utf-8'))
+    self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
+
+  #################################
+  ## helper functions 
+  #################################
   def helperDataCheck(self, rs, status_code, error, portid, sessionid,
                       enabled=None, timestamp=None, src=None, dst=None):
 
@@ -665,20 +1021,22 @@ class TestRTPgenRESTGW(unittest.TestCase):
 
     if 'state' in data:
       self.assertNotEqual(data['state'], None)
-    if enabled:
+    if enabled!=None:
       self.assertEqual(data['state']['enabled'], enabled)
-    if timestamp:
+    if timestamp!=None:
       self.assertEqual(data['state']['start_timestamp'], timestamp)
-    if src:
+    if src!=None:
       s_ip, s_port=src; 
       self.assertEqual(data['state']['src']['ip'], s_ip)
       self.assertEqual(data['state']['src']['port'], s_port)
-    if dst:
+    if dst!=None:
       d_ip, d_port=dst
       self.assertEqual(data['state']['dst']['ip'], d_ip)
       self.assertEqual(data['state']['dst']['port'], d_port)
-    self.assertEqual(data['session_id'], sessionid)
-    self.assertEqual(data['port_id'], portid)
+    if sessionid!=None:
+      self.assertEqual(data['session_id'], sessionid)
+    if portid!=None:
+      self.assertEqual(data['port_id'], portid)
     self.assertEqual(data['result'], status_code)
 
   def helperCreateSuccessMsg(self, portid, sessionid):
@@ -728,9 +1086,11 @@ class TestResourceMapManager(unittest.TestCase):
     return msg
 
   def appendMap(self):
+    self.rsc.setMaxPortid(254)
+    self.rsc.setMaxSessionid(254)
     rsc=self.rsc.resourceMap
-    for portid in range(1,254):
-      for sessionid in range(1,254):
+    for portid in range(0,255):
+      for sessionid in range(0,255):
         if not portid in rsc:
           rsc[portid]={}
         rsc[portid][sessionid]={
@@ -820,6 +1180,15 @@ class TestResourceMapManager(unittest.TestCase):
     self.assertEqual(self.rsc.resourceMap[portid][sessionid]["dst"]["ip"],'192.168.231.93')
     self.assertEqual(self.rsc.resourceMap[portid][sessionid]["dst"]["port"],231)
 
+  def test_srchrsc_ignore_disabled(self):
+    self.appendMap()
+    src=("192.168.93.231", 93)
+    dst=("192.168.231.93", 231)
+    self.rsc.resourceMap[93][231]['enabled']=False
+    portid, sessionid = self.rsc.srchrsc(src, dst)
+    self.assertIsNone(portid)
+    self.assertIsNone(sessionid)
+
   def test_srchrsc_error(self):
     self.appendMap()
     src=("192.168.92.231", 93)
@@ -827,6 +1196,29 @@ class TestResourceMapManager(unittest.TestCase):
     portid, sessionid = self.rsc.srchrsc(src, dst)
     self.assertIsNone(portid)
     self.assertIsNone(sessionid)
+    
+  def test_assignhrsc(self):
+    self.rsc.setMaxPortid(254)
+    self.rsc.setMaxSessionid(254)
+    portid, sessionid = self.rsc.assignrsc()
+    self.assertEqual(portid   , 0)
+    self.assertEqual(sessionid, 0)
+
+    self.appendMap()
+    del self.rsc.resourceMap[123][89]
+    portid, sessionid = self.rsc.assignrsc()
+    self.assertEqual(portid   , 123)
+    self.assertEqual(sessionid, 89)
+
+    self.rsc.resourceMap[3][123]['enabled']=False
+    portid, sessionid = self.rsc.assignrsc()
+    self.assertEqual(portid   , 3)
+    self.assertEqual(sessionid, 123)
+
+    del self.rsc.resourceMap[193][0]
+    portid, sessionid = self.rsc.assignrsc()
+    self.assertEqual(portid   , 3)
+    self.assertEqual(sessionid, 123)
     
   def test_getrsc(self):
     self.appendMap()
