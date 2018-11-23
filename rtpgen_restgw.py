@@ -26,7 +26,6 @@ api_port     = int(os.getenv("BIND_PORT"  , 5000       ))
 target_ip    =     os.getenv("SB_API_IP"  , "127.0.0.1")
 target_port  = int(os.getenv("SB_API_PORT", 7700       ))
 loglevel     = int(os.getenv("LOGLEVEL"  , log.DEBUG  ))
-audio_file   =   os.getenv("AUDIO_FILE"  , None       )
 
 ''' global variables '''
 app = Flask(__name__)
