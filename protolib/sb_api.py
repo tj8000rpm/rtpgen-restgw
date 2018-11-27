@@ -291,6 +291,41 @@ class SouthboundApiManager(object):
 
     return res
 
+  def searchBounds(self):
+    """Search active port ids and max sessions
+
+    You can know the active ports list and max sessions size that
+    was configured in southbound program.
+
+    Args:
+      voided
+
+    Returns:
+      tuple(list, int): The pair of active ports list and max session size
+    """
+    portlist=[]
+    maxsessios=0
+
+    portid=99
+    maxsessios=99999
+
+    ret=self.sendmsg(self.getmsg(portid, maxsessios))
+    if ret.response_code != pb.RtpgenIPCmsgV1.ERROR_NOT_FOUND or not ret.HasField('id_selector'):
+      return None, None
+
+    maxsessios=ret.id_selector
+    ret=self.sendmsg(self.getmsg(portid, maxsessios))
+    if ret.response_code != pb.RtpgenIPCmsgV1.ERROR_NOT_FOUND or not ret.HasField('portid'):
+      return None, None
+
+    for i in range(ret.portid+1):
+      ret=self.sendmsg(self.getmsg(i, maxsessios))
+      if ret.response_code == pb.RtpgenIPCmsgV1.ERROR_FORBIDDEN:
+        continue
+      portlist.append(i)
+
+    return portlist, maxsessios+1
+
 class Test_SouthboundApiManager(unittest.TestCase):
   ipc=None
   def setUp(self):
@@ -399,13 +434,15 @@ class Test_SouthboundApiManager(unittest.TestCase):
     pack=self.ipc.putmsg(portid, selector)
     self.assertEqual(pack.request_code, pb.RtpgenIPCmsgV1.UPDATE)
 
-  def stub_server(sock, msg, loop=1):
+  def stub_server(sock, msg, loop=1, msgs=None):
     ssock=None
     sock.listen(1)
     try:
       ssock, remoteaddrs = sock.accept() 
       for i in range(loop):
         ssock.recv(SouthboundApiManager.BUF_SIZE)
+        if msgs!=None:
+          msg=msgs[i]
         ssock.send(msg.SerializeToString())
     except OSError:
       pass
@@ -460,3 +497,49 @@ class Test_SouthboundApiManager(unittest.TestCase):
       if server:
         server.close()
 
+  def test_searchBounds(self):
+    th=None
+    sock=None
+    server=None
+    target=('127.0.0.1',43991)
+
+    msgs=[]
+
+    expectmsg=pb.RtpgenIPCmsgV1()
+    expectmsg.response_code=pb.RtpgenIPCmsgV1.ERROR_NOT_FOUND
+    expectmsg.id_selector=84
+    msgs.append(expectmsg)
+
+    expectmsg=pb.RtpgenIPCmsgV1()
+    expectmsg.response_code=pb.RtpgenIPCmsgV1.ERROR_NOT_FOUND
+    expectmsg.portid=31
+    msgs.append(expectmsg)
+
+    for i in range(32):
+      expectmsg=pb.RtpgenIPCmsgV1()
+      if i in [0,4,9,31]:
+        expectmsg.response_code=pb.RtpgenIPCmsgV1.ERROR_NOT_FOUND
+      else:
+        expectmsg.response_code=pb.RtpgenIPCmsgV1.ERROR_FORBIDDEN
+        expectmsg.portid=i
+      msgs.append(expectmsg)
+
+    try:
+      server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+      server.bind(target)
+      th=threading.Thread(target=Test_SouthboundApiManager.stub_server,
+                          args=(server, expectmsg, len(msgs), msgs, ))
+      th.start()
+      self.ipc.createConnection(target)
+      ports, sessionsize=self.ipc.searchBounds()
+      self.assertEqual(ports, [0,4,9,31])
+      self.assertEqual(sessionsize, 85)
+    finally:
+      if th:
+        th.join()
+      if sock:
+        sock.close()
+      if server:
+        server.close()

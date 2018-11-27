@@ -451,11 +451,14 @@ def main():
   global rscmap
   global sb
   rscmap = ResourceMapManager()
-  rscmap.setMaxPortid(10)
-  rscmap.setMaxSessionid(10)
 
   target=(target_ip, target_port)
   sb = sbapi.SouthboundApiManager(target)
+
+  ports,sessionsize=sb.searchBounds()
+  rscmap.setMaxPortid(len(ports)-1)
+  rscmap.setMaxSessionid(sessionsize-1)
+    
 
   logger.setLevel(loglevel)
   sh = StreamHandler()
