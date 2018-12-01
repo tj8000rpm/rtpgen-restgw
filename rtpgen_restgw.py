@@ -61,6 +61,24 @@ class ResourceMapManager(object):
       rsc[i]={}
     self.maxportid=portid
 
+  def setResources(self, resources):
+    rsc=self.resourceMap
+    for resource in resources:
+      portid=resource['portid']
+      sessionid=resource['sessionid']
+      enabled=resource['enabled']
+      src=resource['src']
+      dst=resource['dst']
+      since=resource['start_timestamp']
+      if not portid in rsc:
+        rsc[portid]={}
+      if not sessionid in rsc[portid]:
+        rsc[portid][sessionid]={}
+      rsc[portid][sessionid]['enabled']=enabled
+      rsc[portid][sessionid]['src']=src
+      rsc[portid][sessionid]['dst']=dst
+      rsc[portid][sessionid]['start_timestamp']=since
+
   def getrsc(self, portid, sessionid):
     """Get resource map value using port id and sessionid
  
@@ -458,7 +476,9 @@ def main():
   ports,sessionsize=sb.searchBounds()
   rscmap.setMaxPortid(len(ports)-1)
   rscmap.setMaxSessionid(sessionsize-1)
-    
+  
+  current_sessions=sb.rscSync(ports, sessionsize)
+  rscmap.setResources(current_sessions)
 
   logger.setLevel(loglevel)
   sh = StreamHandler()
@@ -1010,6 +1030,7 @@ class TestRTPgenRESTGW_API(unittest.TestCase):
     data=json.loads(rs.data.decode('utf-8'))
     self.helperDataCheck(rs, state, err, portid, sessionid, enabled, tmstmp, src, dst)
 
+
   #################################
   ## helper functions 
   #################################
@@ -1239,4 +1260,32 @@ class TestResourceMapManager(unittest.TestCase):
     portid=283
     sessionid=231
     self.assertIsNone(self.rsc.getrsc(portid, sessionid))
+
+  def test_setResources(self):
+    resources=[]
+    for j in [0, 4, 9, 31]:
+      for i in range(10):
+        if i in [4,8]:
+          resource={"portid": j, "sessionid": i, "enabled": True}
+          ip_dst_addr="192.168.0.1"
+          ip_src_addr="172.16.0.155"
+          udp_dst_port=5000+i
+          udp_src_port=8000+i
+          resource["src"]={"ip": ip_src_addr, "port": udp_src_port}
+          resource["dst"]={"ip": ip_dst_addr, "port": udp_dst_port}
+          resource["start_timestamp"]=12345
+          resources.append(resource)
+
+    self.rsc.setResources(resources)
+
+    rscMap=self.rsc.resourceMap
+    for portid in [0, 4, 9, 31]:
+      for sessionid in [4, 8]:
+        data=rscMap[portid][sessionid]
+        self.assertEqual(data['enabled'], True)
+        self.assertEqual(data['src']['ip'], "172.16.0.155")
+        self.assertEqual(data['src']['port'], 8000+sessionid)
+        self.assertEqual(data['dst']['ip'], "192.168.0.1")
+        self.assertEqual(data['dst']['port'], 6000+sessionid)
+        self.assertEqual(data['start_timestamp'], 12345)
 

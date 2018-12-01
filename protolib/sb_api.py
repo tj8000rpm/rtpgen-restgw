@@ -1,10 +1,13 @@
 #!/usr/bin/python3.6
+import asyncio
 import socket
+import select
 import threading
 import unittest
 import protolib.ipc_pack_pb2 as pb
 
-class SouthboundApiManager(object):
+class SouthboundApiManager(asyncio.Protocol):
+#class SouthboundApiManager(object):
   BUF_SIZE=1024
 
   @staticmethod
@@ -47,22 +50,23 @@ class SouthboundApiManager(object):
     except:
       return None
 
-  def __init__(self, target=None):
-    """Constructor
-
-    Create socket descriptor.
-    In case of set the 'target' value, you can create connection(OPTIONAL).
-
-    Args:
-      target(tuple(str,int)): A target API endpoint as tuple of ipaddr and port.
-  
-    Returns:
-      voided
- 
-    """
-    self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    if target:
-      self.createConnection(target)
+#  def __init__(self, target=None):
+#    """Constructor
+#
+#    Create socket descriptor.
+#    In case of set the 'target' value, you can create connection(OPTIONAL).
+#
+#    Args:
+#      target(tuple(str,int)): A target API endpoint as tuple of ipaddr and port.
+#  
+#    Returns:
+#      voided
+# 
+#    """
+#    self.ev_loop = asyncio.get_event_loop()
+#    #self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#    if target:
+#      self.createConnection(target)
 
   def createConnection(self, target=('127.0.0.1',77099)):
     """Open the scoket connection
@@ -76,7 +80,10 @@ class SouthboundApiManager(object):
       voided
  
     """
-    self.sock.connect(target)
+    #self.sock.connect(target)
+    self.ev_loop = asyncio.get_event_loop()
+    host, port = target
+    factory = self.ev_loop.create_server(self, host, port)
 
   def connectionClose(self):
     """Close the scoket connection
@@ -326,6 +333,26 @@ class SouthboundApiManager(object):
 
     return portlist, maxsessios+1
 
+  def rscSync(self, portlist, session_size):
+    data=[]
+    for portid in portlist:
+      for sessionid in range(session_size):
+        ret=self.sendmsg(self.getmsg(portid, sessionid))
+        if ret.response_code == pb.RtpgenIPCmsgV1.SUCCESS:
+          s_ip=ret.rtp_config.ip_src_addr
+          d_ip=ret.rtp_config.ip_dst_addr
+          s_port=ret.rtp_config.udp_src_port
+          d_port=ret.rtp_config.udp_dst_port
+          timestamp=ret.rtp_config.rtp_timestamp
+          subdata={portid: {sessionid: {}}}
+          subdata={"portid": portid, "sessionid": sessionid}
+          subdata["src"]={"ip": SouthboundApiManager.ip_i2s(s_ip), "port": s_port}
+          subdata["dst"]={"ip": SouthboundApiManager.ip_i2s(d_ip), "port": d_port}
+          subdata["enabled"]=True
+          subdata["start_timestamp"]=timestamp
+          data.append(subdata)
+    return data
+
 class Test_SouthboundApiManager(unittest.TestCase):
   ipc=None
   def setUp(self):
@@ -536,6 +563,66 @@ class Test_SouthboundApiManager(unittest.TestCase):
       ports, sessionsize=self.ipc.searchBounds()
       self.assertEqual(ports, [0,4,9,31])
       self.assertEqual(sessionsize, 85)
+    finally:
+      if th:
+        th.join()
+      if sock:
+        sock.close()
+      if server:
+        server.close()
+
+  def test_rscSync(self):
+    th=None
+    sock=None
+    server=None
+    target=('127.0.0.1',43991)
+
+    msgs=[]
+
+    portlist=[0, 4, 9, 31]
+    activeSessions=[4, 8]
+
+    for j in portlist:
+      for i in range(10):
+        expectmsg=pb.RtpgenIPCmsgV1()
+        if i in activeSessions:
+          expectmsg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
+          expectmsg.portid=j
+          expectmsg.id_selector=i
+          expectmsg.rtp_config.ip_dst_addr=SouthboundApiManager.ip_s2i("192.168.0.1")
+          expectmsg.rtp_config.ip_src_addr=SouthboundApiManager.ip_s2i("172.16.0.155")
+          expectmsg.rtp_config.udp_dst_port=5000+i
+          expectmsg.rtp_config.udp_src_port=8000+i
+          expectmsg.rtp_config.rtp_timestamp=12345
+          expectmsg.rtp_config.rtp_sequence=5678
+          expectmsg.rtp_config.rtp_ssrc=12345
+        else:
+          expectmsg.response_code=pb.RtpgenIPCmsgV1.ERROR_NOT_FOUND
+        msgs.append(expectmsg)
+
+
+    try:
+      server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+      server.bind(target)
+      th=threading.Thread(target=Test_SouthboundApiManager.stub_server,
+                          args=(server, expectmsg, len(msgs), msgs, ))
+      th.start()
+      self.ipc.createConnection(target)
+      rsclist=self.ipc.rscSync(portlist, 10)
+
+      for portid in portlist:
+        for sessionid in activeSessions:
+          data=rsclist.pop(0)
+          self.assertEqual(data["portid"], portid)
+          self.assertEqual(data["sessionid"], sessionid)
+          self.assertEqual(data["enabled"], True)
+          self.assertEqual(data['src']['ip'], "172.16.0.155")
+          self.assertEqual(data['dst']['ip'], "192.168.0.1")
+          self.assertEqual(data['src']['port'], 8000+sessionid)
+          self.assertEqual(data['dst']['port'], 5000+sessionid)
+          self.assertEqual(data['start_timestamp'], 12345)
     finally:
       if th:
         th.join()
