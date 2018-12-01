@@ -1,13 +1,11 @@
 #!/usr/bin/python3.6
-import asyncio
 import socket
 import select
 import threading
 import unittest
 import protolib.ipc_pack_pb2 as pb
 
-class SouthboundApiManager(asyncio.Protocol):
-#class SouthboundApiManager(object):
+class SouthboundApiManager(object):
   BUF_SIZE=1024
 
   @staticmethod
@@ -50,23 +48,22 @@ class SouthboundApiManager(asyncio.Protocol):
     except:
       return None
 
-#  def __init__(self, target=None):
-#    """Constructor
-#
-#    Create socket descriptor.
-#    In case of set the 'target' value, you can create connection(OPTIONAL).
-#
-#    Args:
-#      target(tuple(str,int)): A target API endpoint as tuple of ipaddr and port.
-#  
-#    Returns:
-#      voided
-# 
-#    """
-#    self.ev_loop = asyncio.get_event_loop()
-#    #self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#    if target:
-#      self.createConnection(target)
+  def __init__(self, target=None):
+    """Constructor
+
+    Create socket descriptor.
+    In case of set the 'target' value, you can create connection(OPTIONAL).
+
+    Args:
+      target(tuple(str,int)): A target API endpoint as tuple of ipaddr and port.
+  
+    Returns:
+      voided
+ 
+    """
+    self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if target:
+      self.createConnection(target)
 
   def createConnection(self, target=('127.0.0.1',77099)):
     """Open the scoket connection
@@ -80,10 +77,7 @@ class SouthboundApiManager(asyncio.Protocol):
       voided
  
     """
-    #self.sock.connect(target)
-    self.ev_loop = asyncio.get_event_loop()
-    host, port = target
-    factory = self.ev_loop.create_server(self, host, port)
+    self.sock.connect(target)
 
   def connectionClose(self):
     """Close the scoket connection
