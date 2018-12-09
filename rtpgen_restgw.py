@@ -49,19 +49,19 @@ class ResourceMapManager(object):
     }
     '''
     self.resourceMap={}
-    self.maxportid=0
-    self.maxsessionid=0
+    self.portsize=0
+    self.sessionsize=0
 
-  def setMaxSessionid(self, sessionid):
-    self.maxsessionid=sessionid
-
-  def setMaxPortid(self, portid):
+  def setPortSize(self, size):
     rsc=self.resourceMap
-    for i in range(0, portid+1):
+    for i in range(0, size):
       rsc[i]={}
-    self.maxportid=portid
+    self.portsize=size
 
-  def setResources(self, resources):
+  def setSessionSize(self, size):
+    self.sessionsize=size
+
+  def setInitialResources(self, resources):
     rsc=self.resourceMap
     for resource in resources:
       portid=resource['portid']
@@ -154,7 +154,7 @@ class ResourceMapManager(object):
     rsc=self.resourceMap
     for portid in rsc.keys():
       tgt=rsc[portid]
-      for sessionid in range(self.maxsessionid+1):
+      for sessionid in range(self.sessionsize):
         if not sessionid in tgt.keys() or not tgt[sessionid]['enabled']:
           return portid, sessionid
     return None, None
@@ -258,10 +258,10 @@ class ResourceMapManager(object):
     return rsc[portid][sessionid]
 
   def validationIds(self, portid, sessionid):
-    if not(0 <= portid and portid <= self.maxportid):
-      return 416, 'portid range error (0 <= n <= {})'.format(self.maxportid)
-    if not(0 <= sessionid and sessionid <= self.maxsessionid):
-      return 416, 'sessionid range error (0 <= n <= {})'.format(self.maxsessionid)
+    if not(0 <= portid and portid < self.portsize):
+      return 416, 'portid range error (0 <= n <= {})'.format(self.portsize)
+    if not(0 <= sessionid and sessionid < self.sessionsize):
+      return 416, 'sessionid range error (0 <= n <= {})'.format(self.sessionsize)
     if not(portid in self.resourceMap):
       return 403, 'port id {} does not active'.format(portid)
     if not(sessionid in self.resourceMap[portid]) or not(self.resourceMap[portid][sessionid]['enabled']):
@@ -278,7 +278,6 @@ def apiid(portid=None, sessionid=None):
   dst=None; d_ip=None; d_port=None
 
   # dynamic api port and id resolovatoin
-  # TODO: implement this case for dynamic api
   # In case of Dynamic API
   if not portid or not sessionid: 
     try:
@@ -474,11 +473,11 @@ def main():
   sb = sbapi.SouthboundApiManager(target)
 
   ports,sessionsize=sb.searchBounds()
-  rscmap.setMaxPortid(len(ports)-1)
-  rscmap.setMaxSessionid(sessionsize-1)
+  rscmap.setPortSize(len(ports))
+  rscmap.setSessionSize(sessionsize)
   
   current_sessions=sb.rscSync(ports, sessionsize)
-  rscmap.setResources(current_sessions)
+  rscmap.setInitialResources(current_sessions)
 
   logger.setLevel(loglevel)
   sh = StreamHandler()
@@ -514,8 +513,8 @@ class TestRTPgenRESTGW_API(unittest.TestCase):
     self.th = None
     self.c = app.test_client()
     rscmap = ResourceMapManager()
-    rscmap.setMaxPortid(10)
-    rscmap.setMaxSessionid(10)
+    rscmap.setPortSize(10)
+    rscmap.setSessionSize(10)
     sb = sbapi.SouthboundApiManager()
     self.target=('127.0.0.1', 55077)
 
@@ -1109,8 +1108,8 @@ class TestResourceMapManager(unittest.TestCase):
     return msg
 
   def appendMap(self):
-    self.rsc.setMaxPortid(254)
-    self.rsc.setMaxSessionid(254)
+    self.rsc.setPortSize(255)
+    self.rsc.setSessionSize(255)
     rsc=self.rsc.resourceMap
     for portid in range(0,255):
       for sessionid in range(0,255):
@@ -1221,8 +1220,8 @@ class TestResourceMapManager(unittest.TestCase):
     self.assertIsNone(sessionid)
     
   def test_assignhrsc(self):
-    self.rsc.setMaxPortid(254)
-    self.rsc.setMaxSessionid(254)
+    self.rsc.setPortSize(255)
+    self.rsc.setSessionSize(255)
     portid, sessionid = self.rsc.assignrsc()
     self.assertEqual(portid   , 0)
     self.assertEqual(sessionid, 0)
@@ -1261,7 +1260,7 @@ class TestResourceMapManager(unittest.TestCase):
     sessionid=231
     self.assertIsNone(self.rsc.getrsc(portid, sessionid))
 
-  def test_setResources(self):
+  def test_setInitialResources(self):
     resources=[]
     for j in [0, 4, 9, 31]:
       for i in range(10):
@@ -1276,7 +1275,7 @@ class TestResourceMapManager(unittest.TestCase):
           resource["start_timestamp"]=12345
           resources.append(resource)
 
-    self.rsc.setResources(resources)
+    self.rsc.setInitialResources(resources)
 
     rscMap=self.rsc.resourceMap
     for portid in [0, 4, 9, 31]:
@@ -1286,6 +1285,6 @@ class TestResourceMapManager(unittest.TestCase):
         self.assertEqual(data['src']['ip'], "172.16.0.155")
         self.assertEqual(data['src']['port'], 8000+sessionid)
         self.assertEqual(data['dst']['ip'], "192.168.0.1")
-        self.assertEqual(data['dst']['port'], 6000+sessionid)
+        self.assertEqual(data['dst']['port'], 5000+sessionid)
         self.assertEqual(data['start_timestamp'], 12345)
 
