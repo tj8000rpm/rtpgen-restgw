@@ -77,6 +77,7 @@ class SouthboundApiManager(object):
       voided
  
     """
+    self.target=target
     self.sock.connect(target)
 
   def connectionClose(self):
@@ -280,7 +281,24 @@ class SouthboundApiManager(object):
  
     """
     res=None
-    self.sock.send(msg.SerializeToString())
+    try:
+      self.sock.send(msg.SerializeToString())
+    except (BrokenPipeError, ConnectionResetError) as e:
+      refuseerror=None
+      for retryCnt in range(3,0,-1):
+        try:
+          self.connectionClose()
+          self.sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          self.createConnection(self.target)
+          raise ConnectionResetError
+        except ConnectionRefusedError as e2:
+          refuseerror=e2
+          continue
+        except ConnectionResetError as e2:
+          raise e2
+      else:
+        raise refuseerror
+
     try:
       res=pb.RtpgenIPCmsgV1()
       res.ParseFromString(self.sock.recv(SouthboundApiManager.BUF_SIZE))
@@ -517,6 +535,112 @@ class Test_SouthboundApiManager(unittest.TestCase):
         sock.close()
       if server:
         server.close()
+
+  def test_sendmsgReconnect(self):
+    th=None
+    sock=None
+    server=None
+    target=('127.0.0.1',43991)
+
+    expectmsg=pb.RtpgenIPCmsgV1()
+    expectmsg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
+    expectmsg.portid=1
+    expectmsg.id_selector=2
+    expectmsg.size=3
+    expectmsg.rtp_config.ip_dst_addr=4
+    expectmsg.rtp_config.ip_src_addr=5
+    expectmsg.rtp_config.udp_dst_port=6
+    expectmsg.rtp_config.udp_src_port=7
+    expectmsg.rtp_config.rtp_timestamp=8
+    expectmsg.rtp_config.rtp_sequence=9
+    expectmsg.rtp_config.rtp_ssrc=10
+
+    try:
+      server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+      server.bind(target)
+      th=threading.Thread(target=Test_SouthboundApiManager.stub_server, args=(server, expectmsg, ))
+      th.start()
+      self.ipc.createConnection(target)
+      server.shutdown(socket.SHUT_RDWR)
+      server.close()
+      th.join()
+
+      server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+      server.bind(target)
+      th=threading.Thread(target=Test_SouthboundApiManager.stub_server, args=(server, expectmsg, ))
+      th.start()
+
+      self.assertRaises(ConnectionResetError, lambda: self.ipc.sendmsg(self.ipc.getmsg(0,1)))
+
+      res=self.ipc.sendmsg(self.ipc.getmsg(0,1))
+      self.assertEqual(res.response_code, pb.RtpgenIPCmsgV1.SUCCESS)
+      self.assertEqual(res.portid,      1)
+      self.assertEqual(res.id_selector, 2)
+      self.assertEqual(res.size,        3)
+      self.assertEqual(res.rtp_config.ip_dst_addr,   4)
+      self.assertEqual(res.rtp_config.ip_src_addr,   5)
+      self.assertEqual(res.rtp_config.udp_dst_port,  6)
+      self.assertEqual(res.rtp_config.udp_src_port,  7)
+      self.assertEqual(res.rtp_config.rtp_timestamp, 8)
+      self.assertEqual(res.rtp_config.rtp_sequence,  9)
+      self.assertEqual(res.rtp_config.rtp_ssrc,     10)
+    finally:
+      if sock:
+        sock.close()
+      if server:
+        server.shutdown(socket.SHUT_RDWR)
+        server.close()
+      if th:
+        th.join()
+
+
+  def test_sendmsgReconnectFail(self):
+    th=None
+    sock=None
+    server=None
+    target=('127.0.0.1',43991)
+
+    expectmsg=pb.RtpgenIPCmsgV1()
+    expectmsg.response_code=pb.RtpgenIPCmsgV1.SUCCESS
+    expectmsg.portid=1
+    expectmsg.id_selector=2
+    expectmsg.size=3
+    expectmsg.rtp_config.ip_dst_addr=4
+    expectmsg.rtp_config.ip_src_addr=5
+    expectmsg.rtp_config.udp_dst_port=6
+    expectmsg.rtp_config.udp_src_port=7
+    expectmsg.rtp_config.rtp_timestamp=8
+    expectmsg.rtp_config.rtp_sequence=9
+    expectmsg.rtp_config.rtp_ssrc=10
+
+    try:
+      server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEPORT, 1,)
+      server.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1,)
+      server.bind(target)
+      th=threading.Thread(target=Test_SouthboundApiManager.stub_server, args=(server, expectmsg, ))
+      th.start()
+      self.ipc.createConnection(target)
+      server.shutdown(socket.SHUT_RDWR)
+      server.close()
+      th.join()
+
+      self.assertRaises(ConnectionRefusedError, lambda: self.ipc.sendmsg(self.ipc.getmsg(0,1)))
+    finally:
+      if sock:
+        sock.close()
+      if server:
+        try:
+          server.shutdown(socket.SHUT_RDWR)
+        except OSError:
+          pass
+        server.close()
+      if th:
+        th.join()
 
   def test_searchBounds(self):
     th=None

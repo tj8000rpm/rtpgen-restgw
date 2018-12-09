@@ -268,6 +268,31 @@ class ResourceMapManager(object):
       return 404, 'port id {} : session id {} does not active'.format(portid, sessionid)
     return 200, None
 
+def sendingHandler(msg, result):
+  ret=None
+  try:
+   ret=sb.sendmsg(msg)
+   if not ret or ret.response_code != pb.RtpgenIPCmsgV1.SUCCESS:
+     #return returnErrorContent(500, 'IPC layer error', result)
+     raise BrokenPipeError
+  except ConnectionResetError as e:
+    syncronizeResouces()
+    raise e
+  except ConnectionRefusedError as e:
+    pass
+  except BrokenPipeError as e:
+    raise e
+
+  return ret
+
+def syncronizeResouces(): 
+  logger.info('Syncronize resource from southbound...')
+  ports,sessionsize=sb.searchBounds()
+  rscmap.setPortSize(len(ports))
+  rscmap.setSessionSize(sessionsize)
+  current_sessions=sb.rscSync(ports, sessionsize)
+  rscmap.setInitialResources(current_sessions)
+
 ''' API Call '''
 @app.route('/api/v1/dynamic',methods=['GET','DELETE','POST','PUT'])
 @app.route('/api/v1/id/<portid>:<sessionid>',methods=['GET','DELETE','POST','PUT'])
@@ -340,7 +365,6 @@ def apiid(portid=None, sessionid=None):
     except ValueError:
       return returnErrorContent(400, 'invalid argument(Not a valid number)', result)
 
-
   try:
     if s_ip:
       ipaddress.ip_address(s_ip)
@@ -369,9 +393,7 @@ def apiid(portid=None, sessionid=None):
 
       # Create Southbound and resource map
       tmstmp=random.randint(0,0xffffffff)
-      ret=sb.sendmsg(sb.postmsg(portid, sessionid, src=src, dst=dst, timestamp=tmstmp))
-      if not ret or ret.response_code != pb.RtpgenIPCmsgV1.SUCCESS:
-        return returnErrorContent(500, 'IPC layer error', result)
+      ret=sendingHandler(sb.postmsg(portid, sessionid, src=src, dst=dst, timestamp=tmstmp),result)
 
       rsc=rscmap.addrsc(portid, sessionid, src=src, dst=dst, timestamp=tmstmp)
       retCode=200
@@ -392,9 +414,7 @@ def apiid(portid=None, sessionid=None):
       ##################
       # Delete Southbound and resource map
       elif request.method == 'DELETE':
-        ret=sb.sendmsg(sb.delmsg(portid,sessionid))
-        if not ret or ret.response_code != pb.RtpgenIPCmsgV1.SUCCESS:
-          return returnErrorContent(500, 'IPC layer error', result)
+        ret=sendingHandler(sb.delmsg(portid,sessionid),result)
 
         rsc=rscmap.delrsc(portid, sessionid)
         result['state']=rsc
@@ -414,16 +434,16 @@ def apiid(portid=None, sessionid=None):
         if s_port: src=(src[0], s_port)
         if d_ip  : dst=(d_ip, dst[1])
         if d_port: dst=(dst[0], d_port)
-
-        ret=sb.sendmsg(sb.putmsg(portid, sessionid, src=src, dst=dst))
-        if not ret or ret.response_code != pb.RtpgenIPCmsgV1.SUCCESS:
-          return returnErrorContent(500, 'IPC layer error', result)
+        
+        ret=sendingHandler(sb.putmsg(portid, sessionid, src=src, dst=dst),result)
         rsc=rscmap.putrsc(portid, sessionid, src=src, dst=dst)
         result['state']=rsc
   except ValueError as e:
     return returnErrorContent(400, 'input is not a number', result)
   except TypeError as e:
     return returnErrorContent(400, 'invalid argument', result)
+  except ConnectionResetError as e:
+    return returnErrorContent(500, 'Connection reseted', result)
   except Exception as e:
     return returnErrorContent(500, 'internal server error', result)
     #return returnErrorContent(500, e.__str__(), result)
@@ -472,18 +492,13 @@ def main():
   target=(target_ip, target_port)
   sb = sbapi.SouthboundApiManager(target)
 
-  ports,sessionsize=sb.searchBounds()
-  rscmap.setPortSize(len(ports))
-  rscmap.setSessionSize(sessionsize)
-  
-  current_sessions=sb.rscSync(ports, sessionsize)
-  rscmap.setInitialResources(current_sessions)
-
   logger.setLevel(loglevel)
   sh = StreamHandler()
   logger.addHandler(sh)
   formatter = Formatter('%(asctime)s:%(lineno)d:%(levelname)s:%(message)s')
   sh.setFormatter(formatter)
+
+  syncronizeResouces()
 
   logger.info('server started...')
 
