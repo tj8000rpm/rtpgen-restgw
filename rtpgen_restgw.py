@@ -506,6 +506,9 @@ def main():
 
   logger.info('API interface is up...')
   logger.debug('API binded {}:{}...'.format(api_ip,api_port))
+
+main()
+if __name__ == '__main__':
   app.run(host=api_ip,port=api_port)
 
   logger.info('server termsinating...')
@@ -514,9 +517,6 @@ def main():
     sb=None
   if rscmap:
     rscmap=None
-
-if __name__ == '__main__':
-  main()
 
 ''' Unit Test Cases '''
 
